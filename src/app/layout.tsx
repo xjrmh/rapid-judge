@@ -36,6 +36,18 @@ export default function RootLayout({
           <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
             {children}
           </main>
+          <footer className="mt-auto py-4 text-center text-xs text-muted-foreground">
+            © 2026{" "}
+            <a
+              href="https://www.xjrmh.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-foreground underline underline-offset-2"
+            >
+              xjrmh
+            </a>
+            . Pre-alpha build.
+          </footer>
           <Toaster />
         </Providers>
       </body>

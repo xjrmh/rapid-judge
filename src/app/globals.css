@@ -116,6 +116,32 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* Animating --demo-hue as a registered custom property lets the browser
+   interpolate the number smoothly, producing a visible hue-cycling effect
+   that isn't defeated by cascade order or !important fights. */
+@property --demo-hue {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 245;
+}
+
+@keyframes demo-hue-cycle {
+  0%   { --demo-hue: 245; }
+  50%  { --demo-hue: 305; }
+  100% { --demo-hue: 245; }
+}
+
+.btn-demo {
+  background-color: oklch(0.88 0.12 var(--demo-hue)) !important;
+  border-color:     oklch(0.72 0.16 var(--demo-hue)) !important;
+  color:            oklch(0.15 0.04 var(--demo-hue)) !important;
+  animation: demo-hue-cycle 5s ease infinite;
+}
+
+.btn-demo:hover {
+  background-color: oklch(0.84 0.14 var(--demo-hue)) !important;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

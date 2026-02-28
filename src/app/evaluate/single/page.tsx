@@ -88,6 +88,7 @@ export default function SingleEvalPage() {
     setPrompt(SINGLE_DEMO.prompt);
     setResponse(SINGLE_DEMO.response);
     setContext(SINGLE_DEMO.context);
+    setRubricId(SINGLE_DEMO.rubricId);
     setResult(null);
     toast.success("Demo loaded — click Evaluate to run it.");
   }
@@ -101,7 +102,7 @@ export default function SingleEvalPage() {
             Score a single LLM response against a rubric using an LLM judge.
           </p>
         </div>
-        <Button variant="outline" onClick={loadDemo} className="shrink-0 gap-1.5">
+        <Button variant="outline" onClick={loadDemo} className="shrink-0 gap-1.5 btn-demo">
           <Sparkles className="h-3.5 w-3.5" />
           Load Demo
         </Button>

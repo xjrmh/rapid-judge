@@ -2,6 +2,7 @@
 // Used by the "Load Demo" buttons to pre-fill forms with realistic examples.
 
 export const SINGLE_DEMO = {
+  rubricId: "builtin-helpfulness",
   prompt: `Explain the concept of gradient descent to a software engineer who has never studied machine learning. Use an analogy to make it concrete.`,
 
   response: `Gradient descent is the core optimization algorithm used to train machine learning models. Here's how to think about it:
@@ -31,6 +32,7 @@ The key insight: you never need to know the shape of the whole landscape — you
 };
 
 export const PAIRWISE_DEMO = {
+  rubricId: "builtin-overall",
   prompt: `Write a Python function that checks if a given number is prime. Include a brief explanation of your approach.`,
 
   responseA: `def is_prime(n):
@@ -82,6 +84,8 @@ export type DemoBatchRow = {
   responseB?: string;
   context?: string;
 };
+
+export const BATCH_DEMO_RUBRIC_ID = "builtin-overall";
 
 export const BATCH_DEMO_ROWS: DemoBatchRow[] = [
   {

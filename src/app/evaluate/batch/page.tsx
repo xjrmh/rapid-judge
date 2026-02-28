@@ -17,7 +17,7 @@ import { useStore } from "@/lib/store";
 import { getApiKeyHeaders, getDefaultModelId } from "@/lib/api-key-headers";
 import { getBuiltInRubricById } from "@/lib/rubric-templates";
 import { truncate } from "@/lib/utils";
-import { BATCH_DEMO_ROWS } from "@/lib/demo-data";
+import { BATCH_DEMO_ROWS, BATCH_DEMO_RUBRIC_ID } from "@/lib/demo-data";
 import type { EvalResult, BatchRowStatus, EvaluationMode } from "@/lib/types";
 
 interface BatchRow {
@@ -291,6 +291,7 @@ export default function BatchPage() {
       context: row.context,
       status: "pending",
     }));
+    setRubricId(BATCH_DEMO_RUBRIC_ID);
     setRows(demoRows);
     setDone(false);
     toast.success(`Demo loaded — ${demoRows.length} rows ready. Click Run Batch to evaluate.`);
@@ -308,7 +309,7 @@ export default function BatchPage() {
             Upload a CSV or JSONL file to evaluate multiple responses at once.
           </p>
         </div>
-        <Button variant="outline" onClick={loadDemo} className="shrink-0 gap-1.5">
+        <Button variant="outline" onClick={loadDemo} className="shrink-0 gap-1.5 btn-demo">
           <Sparkles className="h-3.5 w-3.5" />
           Load Demo
         </Button>

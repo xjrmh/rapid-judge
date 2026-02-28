@@ -103,6 +103,7 @@ export default function PairwisePage() {
     setLabelA(PAIRWISE_DEMO.labelA);
     setLabelB(PAIRWISE_DEMO.labelB);
     setContext(PAIRWISE_DEMO.context);
+    setRubricId(PAIRWISE_DEMO.rubricId);
     setDoubleBlind(false);
     setResult(null);
     toast.success("Demo loaded — click Compare to run it.");
@@ -117,7 +118,7 @@ export default function PairwisePage() {
             Compare two LLM responses head-to-head and determine which is better.
           </p>
         </div>
-        <Button variant="outline" onClick={loadDemo} className="shrink-0 gap-1.5">
+        <Button variant="outline" onClick={loadDemo} className="shrink-0 gap-1.5 btn-demo">
           <Sparkles className="h-3.5 w-3.5" />
           Load Demo
         </Button>
