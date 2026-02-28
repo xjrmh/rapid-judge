@@ -5,10 +5,20 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
 import { nanoid } from "nanoid";
-import { resolveProvider, getModelById } from "@/lib/models";
+import { getModelById } from "@/lib/models";
 import { buildPairwisePrompt } from "@/lib/prompts";
 import { getBuiltInRubricById } from "@/lib/rubric-templates";
+import { ModelIdSchema, RubricSchema } from "@/lib/eval-validation";
+import {
+  JudgeJsonParseError,
+  normalizeAggregateScore,
+  normalizeCriterionScore,
+  normalizeText,
+  normalizeVerdict,
+  parseJudgeJson,
+} from "@/lib/judge-output";
 import type {
+  Provider,
   Rubric,
   PairwiseEvalResult,
   CriterionScore,
@@ -21,16 +31,15 @@ const RequestSchema = z.object({
   responseB: z.string().min(1),
   modelLabelA: z.string().optional(),
   modelLabelB: z.string().optional(),
-  rubricId: z.string(),
-  rubric: z.any(),
-  modelId: z.string(),
+  rubricId: z.string().min(1),
+  rubric: RubricSchema.optional(),
+  modelId: ModelIdSchema,
   doubleBlind: z.boolean().default(true),
   detectPositionBias: z.boolean().default(false),
   context: z.string().optional(),
 });
 
-function getModel(modelId: string, apiKey: string) {
-  const provider = resolveProvider(modelId);
+function getModel(modelId: string, provider: Provider, apiKey: string) {
   if (provider === "openai") {
     return createOpenAI({ apiKey })(modelId);
   }
@@ -48,15 +57,15 @@ function extractPairwiseScores(
   return rubric.criteria.map((c) => ({
     criterionId: c.id,
     criterionName: c.name,
-    score:
-      Number(
-        (parsed.scores as Record<string, unknown>)?.[`${c.id}_${side}`]
-      ) || 0,
+    score: normalizeCriterionScore(
+      (parsed.scores as Record<string, unknown>)?.[`${c.id}_${side}`],
+      c.scoreRange
+    ),
     maxScore: c.scoreRange,
-    reasoning: String(
+    reasoning: normalizeText(
       (parsed.criterion_reasoning as Record<string, unknown>)?.[
         `${c.id}_${side}_reasoning`
-      ] ?? ""
+      ]
     ),
   }));
 }
@@ -67,11 +76,13 @@ function computeAggregate(scores: CriterionScore[], rubric: Rubric): number {
   for (const cs of scores) {
     const criterion = rubric.criteria.find((c) => c.id === cs.criterionId);
     if (!criterion) continue;
-    weighted += (cs.score / cs.maxScore) * 100 * criterion.weight;
+    const clampedScore = Math.max(1, Math.min(cs.maxScore, cs.score));
+    weighted += (clampedScore / cs.maxScore) * 100 * criterion.weight;
     totalWeight += criterion.weight;
   }
   if (totalWeight === 0) return 0;
-  return Math.round((weighted / totalWeight) * 10) / 10;
+  const score = weighted / totalWeight;
+  return Math.round(Math.max(0, Math.min(100, score)) * 10) / 10;
 }
 
 async function runPairwiseEval(
@@ -80,9 +91,13 @@ async function runPairwiseEval(
   responseB: string,
   rubric: Rubric,
   modelId: string,
+  provider: Provider,
   apiKey: string,
   context: string | undefined,
-  order: "AB" | "BA"
+  order: "AB" | "BA",
+  doubleBlind: boolean,
+  modelLabelA?: string,
+  modelLabelB?: string
 ) {
   const input = {
     prompt,
@@ -90,25 +105,23 @@ async function runPairwiseEval(
     responseB,
     rubricId: rubric.id,
     modelId,
-    doubleBlind: true,
+    doubleBlind,
     detectPositionBias: false,
+    modelLabelA,
+    modelLabelB,
     context,
   };
 
   const judgePrompt = buildPairwisePrompt(input, rubric, order);
 
   const { text, usage } = await generateText({
-    model: getModel(modelId, apiKey),
+    model: getModel(modelId, provider, apiKey),
     prompt: judgePrompt,
     temperature: 0.1,
     maxOutputTokens: 4096,
   });
 
-  const cleaned = text
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/, "")
-    .trim();
-  const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+  const parsed = parseJudgeJson(text);
 
   // When order is BA, swap A/B labels back to canonical A/B
   const scoresA =
@@ -120,24 +133,31 @@ async function runPairwiseEval(
       ? extractPairwiseScores(parsed, rubric, "B")
       : extractPairwiseScores(parsed, rubric, "A");
 
-  const rawVerdict = String(parsed.verdict ?? "tie").toLowerCase();
-  let verdict: PairwiseVerdict;
-  if (rawVerdict === "a") {
-    verdict = order === "AB" ? "A" : "B";
-  } else if (rawVerdict === "b") {
-    verdict = order === "AB" ? "B" : "A";
-  } else {
-    verdict = "tie";
-  }
+  const rawVerdict = normalizeVerdict(parsed.verdict);
+  const verdict: PairwiseVerdict =
+    order === "AB"
+      ? rawVerdict
+      : rawVerdict === "A"
+        ? "B"
+        : rawVerdict === "B"
+          ? "A"
+          : "tie";
 
   return {
-    chainOfThought: String(parsed.chain_of_thought ?? ""),
+    chainOfThought: normalizeText(parsed.chain_of_thought),
+    summary: normalizeText(parsed.summary),
     scoresA,
     scoresB,
-    aggregateA: Number(parsed.aggregate_score_A) || computeAggregate(scoresA, rubric),
-    aggregateB: Number(parsed.aggregate_score_B) || computeAggregate(scoresB, rubric),
+    aggregateA: normalizeAggregateScore(
+      parsed.aggregate_score_A,
+      computeAggregate(scoresA, rubric)
+    ),
+    aggregateB: normalizeAggregateScore(
+      parsed.aggregate_score_B,
+      computeAggregate(scoresB, rubric)
+    ),
     verdict,
-    verdictReasoning: String(parsed.verdict_reasoning ?? ""),
+    verdictReasoning: normalizeText(parsed.verdict_reasoning),
     usage,
   };
 }
@@ -164,15 +184,21 @@ export async function POST(req: NextRequest) {
       detectPositionBias,
       context,
       rubric: rubricSnapshot,
+      rubricId,
     } = parsed.data;
 
-    const rubric: Rubric =
-      rubricSnapshot ?? getBuiltInRubricById(parsed.data.rubricId);
+    const rubric: Rubric | undefined =
+      rubricSnapshot ?? getBuiltInRubricById(rubricId);
     if (!rubric) {
       return NextResponse.json({ error: "Rubric not found" }, { status: 400 });
     }
 
-    const provider = resolveProvider(modelId);
+    const judgeModel = getModelById(modelId);
+    if (!judgeModel) {
+      return NextResponse.json({ error: "Unknown model" }, { status: 400 });
+    }
+
+    const provider = judgeModel.provider;
     const apiKey =
       req.headers.get(`x-${provider}-api-key`) ||
       (provider === "openai"
@@ -189,11 +215,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const judgeModel = getModelById(modelId);
-    if (!judgeModel) {
-      return NextResponse.json({ error: "Unknown model" }, { status: 400 });
-    }
-
     // Primary evaluation (AB order)
     const primary = await runPairwiseEval(
       prompt,
@@ -201,9 +222,13 @@ export async function POST(req: NextRequest) {
       responseB,
       rubric,
       modelId,
+      provider,
       apiKey,
       context,
-      "AB"
+      "AB",
+      doubleBlind,
+      modelLabelA,
+      modelLabelB
     );
 
     let totalInputTokens = primary.usage.inputTokens ?? 0;
@@ -219,19 +244,19 @@ export async function POST(req: NextRequest) {
         responseB,
         rubric,
         modelId,
+        provider,
         apiKey,
         context,
-        "BA"
+        "BA",
+        doubleBlind,
+        modelLabelA,
+        modelLabelB
       );
       totalInputTokens += reversed.usage.inputTokens ?? 0;
       totalOutputTokens += reversed.usage.outputTokens ?? 0;
       reversedVerdict = reversed.verdict;
       reversedChainOfThought = reversed.chainOfThought;
-      // Bias detected if verdicts differ (excluding tie in both)
-      positionBiasDetected =
-        primary.verdict !== "tie" &&
-        reversed.verdict !== "tie" &&
-        primary.verdict !== reversed.verdict;
+      positionBiasDetected = primary.verdict !== reversed.verdict;
     }
 
     const estimatedCostUsd =
@@ -257,6 +282,7 @@ export async function POST(req: NextRequest) {
       rubric,
       judgeModel,
       chainOfThought: primary.chainOfThought,
+      summary: primary.summary || primary.verdictReasoning,
       criterionScoresA: primary.scoresA,
       criterionScoresB: primary.scoresB,
       aggregateScoreA: primary.aggregateA,
@@ -273,6 +299,13 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (err) {
+    if (err instanceof JudgeJsonParseError) {
+      return NextResponse.json(
+        { error: "Judge returned invalid JSON", raw: err.raw },
+        { status: 502 }
+      );
+    }
+
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -5,10 +5,20 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
 import { nanoid } from "nanoid";
-import { resolveProvider, getModelById } from "@/lib/models";
+import { getModelById } from "@/lib/models";
 import { buildSinglePrompt, buildPairwisePrompt } from "@/lib/prompts";
 import { getBuiltInRubricById } from "@/lib/rubric-templates";
+import { ModelIdSchema, RubricSchema } from "@/lib/eval-validation";
+import {
+  JudgeJsonParseError,
+  normalizeAggregateScore,
+  normalizeCriterionScore,
+  normalizeText,
+  normalizeVerdict,
+  parseJudgeJson,
+} from "@/lib/judge-output";
 import type {
+  Provider,
   Rubric,
   SingleEvalResult,
   PairwiseEvalResult,
@@ -22,14 +32,13 @@ const RequestSchema = z.object({
   response: z.string().optional(),
   responseA: z.string().optional(),
   responseB: z.string().optional(),
-  rubricId: z.string(),
-  rubric: z.any(),
-  modelId: z.string(),
+  rubricId: z.string().min(1),
+  rubric: RubricSchema.optional(),
+  modelId: ModelIdSchema,
   context: z.string().optional(),
 });
 
-function getModel(modelId: string, apiKey: string) {
-  const provider = resolveProvider(modelId);
+function getModel(modelId: string, provider: Provider, apiKey: string) {
   if (provider === "openai") {
     return createOpenAI({ apiKey })(modelId);
   }
@@ -45,11 +54,13 @@ function computeAggregate(scores: CriterionScore[], rubric: Rubric): number {
   for (const cs of scores) {
     const criterion = rubric.criteria.find((c) => c.id === cs.criterionId);
     if (!criterion) continue;
-    weighted += (cs.score / cs.maxScore) * 100 * criterion.weight;
+    const clampedScore = Math.max(1, Math.min(cs.maxScore, cs.score));
+    weighted += (clampedScore / cs.maxScore) * 100 * criterion.weight;
     totalWeight += criterion.weight;
   }
   if (totalWeight === 0) return 0;
-  return Math.round((weighted / totalWeight) * 10) / 10;
+  const score = weighted / totalWeight;
+  return Math.round(Math.max(0, Math.min(100, score)) * 10) / 10;
 }
 
 export async function POST(req: NextRequest) {
@@ -63,16 +74,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { mode, prompt, response, responseA, responseB, modelId, context, rubric: rubricSnapshot } =
-      parsed.data;
+    const {
+      mode,
+      prompt,
+      response,
+      responseA,
+      responseB,
+      modelId,
+      context,
+      rubric: rubricSnapshot,
+      rubricId,
+    } = parsed.data;
 
-    const rubric: Rubric =
-      rubricSnapshot ?? getBuiltInRubricById(parsed.data.rubricId);
+    const rubric: Rubric | undefined =
+      rubricSnapshot ?? getBuiltInRubricById(rubricId);
     if (!rubric) {
       return NextResponse.json({ error: "Rubric not found" }, { status: 400 });
     }
 
-    const provider = resolveProvider(modelId);
+    const judgeModel = getModelById(modelId);
+    if (!judgeModel) {
+      return NextResponse.json({ error: "Unknown model" }, { status: 400 });
+    }
+
+    const provider = judgeModel.provider;
     const apiKey =
       req.headers.get(`x-${provider}-api-key`) ||
       (provider === "openai"
@@ -89,11 +114,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const judgeModel = getModelById(modelId);
-    if (!judgeModel) {
-      return NextResponse.json({ error: "Unknown model" }, { status: 400 });
-    }
-
     if (mode === "single") {
       if (!response) {
         return NextResponse.json(
@@ -105,32 +125,33 @@ export async function POST(req: NextRequest) {
       const input = { prompt, response, rubricId: rubric.id, modelId, context };
       const judgePrompt = buildSinglePrompt(input, rubric);
       const { text, usage } = await generateText({
-        model: getModel(modelId, apiKey),
+        model: getModel(modelId, provider, apiKey),
         prompt: judgePrompt,
         temperature: 0.1,
         maxOutputTokens: 4096,
       });
 
-      const cleaned = text
-        .replace(/^```(?:json)?\s*/i, "")
-        .replace(/\s*```\s*$/, "")
-        .trim();
-      const parsedJson = JSON.parse(cleaned) as Record<string, unknown>;
+      const parsedJson = parseJudgeJson(text);
 
       const criterionScores: CriterionScore[] = rubric.criteria.map((c) => ({
         criterionId: c.id,
         criterionName: c.name,
-        score: Number((parsedJson.scores as Record<string, unknown>)?.[c.id]) || 0,
+        score: normalizeCriterionScore(
+          (parsedJson.scores as Record<string, unknown>)?.[c.id],
+          c.scoreRange
+        ),
         maxScore: c.scoreRange,
-        reasoning: String(
+        reasoning: normalizeText(
           (parsedJson.criterion_reasoning as Record<string, unknown>)?.[
             `${c.id}_reasoning`
-          ] ?? ""
+          ]
         ),
       }));
 
-      const aggregateScore =
-        Number(parsedJson.aggregate_score) || computeAggregate(criterionScores, rubric);
+      const aggregateScore = normalizeAggregateScore(
+        parsedJson.aggregate_score,
+        computeAggregate(criterionScores, rubric)
+      );
 
       const inputTokens = usage.inputTokens ?? 0;
       const outputTokens = usage.outputTokens ?? 0;
@@ -142,7 +163,8 @@ export async function POST(req: NextRequest) {
         input,
         rubric,
         judgeModel,
-        chainOfThought: String(parsedJson.chain_of_thought ?? ""),
+        chainOfThought: normalizeText(parsedJson.chain_of_thought),
+        summary: normalizeText(parsedJson.summary),
         criterionScores,
         aggregateScore,
         inputTokens,
@@ -153,101 +175,111 @@ export async function POST(req: NextRequest) {
       };
 
       return NextResponse.json(result);
-    } else {
-      // pairwise
-      if (!responseA || !responseB) {
-        return NextResponse.json(
-          { error: "responseA and responseB are required for pairwise mode" },
-          { status: 400 }
-        );
-      }
-
-      const input = {
-        prompt,
-        responseA,
-        responseB,
-        rubricId: rubric.id,
-        modelId,
-        doubleBlind: true,
-        detectPositionBias: false,
-        context,
-      };
-
-      const judgePrompt = buildPairwisePrompt(input, rubric, "AB");
-      const { text, usage } = await generateText({
-        model: getModel(modelId, apiKey),
-        prompt: judgePrompt,
-        temperature: 0.1,
-        maxOutputTokens: 4096,
-      });
-
-      const cleaned = text
-        .replace(/^```(?:json)?\s*/i, "")
-        .replace(/\s*```\s*$/, "")
-        .trim();
-      const parsedJson = JSON.parse(cleaned) as Record<string, unknown>;
-
-      const criterionScoresA: CriterionScore[] = rubric.criteria.map((c) => ({
-        criterionId: c.id,
-        criterionName: c.name,
-        score:
-          Number((parsedJson.scores as Record<string, unknown>)?.[`${c.id}_A`]) || 0,
-        maxScore: c.scoreRange,
-        reasoning: String(
-          (parsedJson.criterion_reasoning as Record<string, unknown>)?.[
-            `${c.id}_A_reasoning`
-          ] ?? ""
-        ),
-      }));
-
-      const criterionScoresB: CriterionScore[] = rubric.criteria.map((c) => ({
-        criterionId: c.id,
-        criterionName: c.name,
-        score:
-          Number((parsedJson.scores as Record<string, unknown>)?.[`${c.id}_B`]) || 0,
-        maxScore: c.scoreRange,
-        reasoning: String(
-          (parsedJson.criterion_reasoning as Record<string, unknown>)?.[
-            `${c.id}_B_reasoning`
-          ] ?? ""
-        ),
-      }));
-
-      const rawVerdict = String(parsedJson.verdict ?? "tie").toLowerCase();
-      const verdict: PairwiseVerdict =
-        rawVerdict === "a" ? "A" : rawVerdict === "b" ? "B" : "tie";
-
-      const inputTokens = usage.inputTokens ?? 0;
-      const outputTokens = usage.outputTokens ?? 0;
-
-      const result: PairwiseEvalResult = {
-        id: nanoid(),
-        mode: "pairwise",
-        createdAt: new Date().toISOString(),
-        input,
-        rubric,
-        judgeModel,
-        chainOfThought: String(parsedJson.chain_of_thought ?? ""),
-        criterionScoresA,
-        criterionScoresB,
-        aggregateScoreA:
-          Number(parsedJson.aggregate_score_A) ||
-          computeAggregate(criterionScoresA, rubric),
-        aggregateScoreB:
-          Number(parsedJson.aggregate_score_B) ||
-          computeAggregate(criterionScoresB, rubric),
-        verdict,
-        verdictReasoning: String(parsedJson.verdict_reasoning ?? ""),
-        inputTokens,
-        outputTokens,
-        estimatedCostUsd:
-          (inputTokens / 1_000_000) * judgeModel.inputCostPer1M +
-          (outputTokens / 1_000_000) * judgeModel.outputCostPer1M,
-      };
-
-      return NextResponse.json(result);
     }
+
+    // pairwise
+    if (!responseA || !responseB) {
+      return NextResponse.json(
+        { error: "responseA and responseB are required for pairwise mode" },
+        { status: 400 }
+      );
+    }
+
+    const input = {
+      prompt,
+      responseA,
+      responseB,
+      rubricId: rubric.id,
+      modelId,
+      doubleBlind: true,
+      detectPositionBias: false,
+      context,
+    };
+
+    const judgePrompt = buildPairwisePrompt(input, rubric, "AB");
+    const { text, usage } = await generateText({
+      model: getModel(modelId, provider, apiKey),
+      prompt: judgePrompt,
+      temperature: 0.1,
+      maxOutputTokens: 4096,
+    });
+
+    const parsedJson = parseJudgeJson(text);
+
+    const criterionScoresA: CriterionScore[] = rubric.criteria.map((c) => ({
+      criterionId: c.id,
+      criterionName: c.name,
+      score: normalizeCriterionScore(
+        (parsedJson.scores as Record<string, unknown>)?.[`${c.id}_A`],
+        c.scoreRange
+      ),
+      maxScore: c.scoreRange,
+      reasoning: normalizeText(
+        (parsedJson.criterion_reasoning as Record<string, unknown>)?.[
+          `${c.id}_A_reasoning`
+        ]
+      ),
+    }));
+
+    const criterionScoresB: CriterionScore[] = rubric.criteria.map((c) => ({
+      criterionId: c.id,
+      criterionName: c.name,
+      score: normalizeCriterionScore(
+        (parsedJson.scores as Record<string, unknown>)?.[`${c.id}_B`],
+        c.scoreRange
+      ),
+      maxScore: c.scoreRange,
+      reasoning: normalizeText(
+        (parsedJson.criterion_reasoning as Record<string, unknown>)?.[
+          `${c.id}_B_reasoning`
+        ]
+      ),
+    }));
+
+    const rawVerdict = normalizeVerdict(parsedJson.verdict);
+    const verdict: PairwiseVerdict =
+      rawVerdict === "A" ? "A" : rawVerdict === "B" ? "B" : "tie";
+
+    const inputTokens = usage.inputTokens ?? 0;
+    const outputTokens = usage.outputTokens ?? 0;
+
+    const result: PairwiseEvalResult = {
+      id: nanoid(),
+      mode: "pairwise",
+      createdAt: new Date().toISOString(),
+      input,
+      rubric,
+      judgeModel,
+      chainOfThought: normalizeText(parsedJson.chain_of_thought),
+      summary: normalizeText(parsedJson.summary) || normalizeText(parsedJson.verdict_reasoning),
+      criterionScoresA,
+      criterionScoresB,
+      aggregateScoreA: normalizeAggregateScore(
+        parsedJson.aggregate_score_A,
+        computeAggregate(criterionScoresA, rubric)
+      ),
+      aggregateScoreB: normalizeAggregateScore(
+        parsedJson.aggregate_score_B,
+        computeAggregate(criterionScoresB, rubric)
+      ),
+      verdict,
+      verdictReasoning: normalizeText(parsedJson.verdict_reasoning),
+      inputTokens,
+      outputTokens,
+      estimatedCostUsd:
+        (inputTokens / 1_000_000) * judgeModel.inputCostPer1M +
+        (outputTokens / 1_000_000) * judgeModel.outputCostPer1M,
+    };
+
+    return NextResponse.json(result);
   } catch (err) {
+    if (err instanceof JudgeJsonParseError) {
+      return NextResponse.json(
+        { error: "Judge returned invalid JSON", raw: err.raw },
+        { status: 502 }
+      );
+    }
+
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

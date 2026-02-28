@@ -30,7 +30,7 @@ export const useStore = create<AppStore>()(
       // Default settings
       settings: {
         apiKeys: {},
-        defaultModelId: "claude-3-5-sonnet-20241022",
+        defaultModelId: "gpt-4o",
         defaultRubricId: "builtin-overall",
       },
 
@@ -90,12 +90,20 @@ export const useStore = create<AppStore>()(
       merge: (persisted, current) => {
         const ps = (persisted ?? {}) as Partial<AppStore>;
         const defaultSettings = current.settings;
+        const persistedDefaultModelId = ps.settings?.defaultModelId;
+        const mergedDefaultModelId =
+          !persistedDefaultModelId ||
+          persistedDefaultModelId === "claude-3-5-sonnet-20241022"
+            ? defaultSettings.defaultModelId
+            : persistedDefaultModelId;
+
         return {
           ...current,
           ...ps,
           settings: {
             ...defaultSettings,
             ...(ps.settings ?? {}),
+            defaultModelId: mergedDefaultModelId,
             apiKeys: {
               ...defaultSettings.apiKeys,
               ...((ps.settings?.apiKeys ?? {}) as ApiKeys),

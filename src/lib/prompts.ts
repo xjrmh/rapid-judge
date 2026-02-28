@@ -20,7 +20,7 @@ function formatSingleOutputSchema(rubric: Rubric): string {
     .join(",\n");
 
   return `{
-  "chain_of_thought": "<Write your complete step-by-step reasoning here BEFORE assigning any scores. Analyze the response against each criterion systematically.>",
+  "chain_of_thought": "<Concise scoring rationale (3-6 short bullet points). Do not output long hidden deliberation.>",
   "scores": {
 ${scoreKeys}
   },
@@ -47,7 +47,7 @@ function formatPairwiseOutputSchema(rubric: Rubric): string {
     .join(",\n");
 
   return `{
-  "chain_of_thought": "<Step-by-step reasoning: First evaluate Response A on ALL criteria, then evaluate Response B on ALL criteria, then compare the two and explain which is better and why.>",
+  "chain_of_thought": "<Concise comparison rationale (3-6 short bullet points) covering A, B, and final tradeoff.>",
   "scores": {
 ${scoreKeysA},
 ${scoreKeysB}
@@ -56,6 +56,7 @@ ${scoreKeysB}
 ${reasoningKeysA},
 ${reasoningKeysB}
   },
+  "summary": "<2-3 sentence overall comparison summary>",
   "aggregate_score_A": <float between 0.0 and 100.0>,
   "aggregate_score_B": <float between 0.0 and 100.0>,
   "verdict": "<exactly one of: 'A', 'B', or 'tie'>",
@@ -76,7 +77,7 @@ export function buildSinglePrompt(
   return `You are an expert LLM response evaluator. Your job is to score the given response against a structured rubric.
 
 ## Critical Instructions
-- THINK STEP BY STEP before assigning any scores. Write your full reasoning in "chain_of_thought" FIRST, before the scores object.
+- Analyze carefully, but output only concise rationale in "chain_of_thought" (3-6 bullets) before scores.
 - Response LENGTH is NOT a proxy for quality. A concise, accurate answer can and should outscore a verbose, padded one.
 - Score each criterion INDEPENDENTLY based on its specific definition.
 - Use the FULL score range — do not cluster scores near the middle. A 1 means genuinely poor; the max score means genuinely excellent.
@@ -110,15 +111,34 @@ export function buildPairwisePrompt(
     order === "AB"
       ? [input.responseA, input.responseB]
       : [input.responseB, input.responseA];
+  const [labelFirst, labelSecond] =
+    order === "AB"
+      ? [
+          input.modelLabelA?.trim() || "Model A",
+          input.modelLabelB?.trim() || "Model B",
+        ]
+      : [
+          input.modelLabelB?.trim() || "Model B",
+          input.modelLabelA?.trim() || "Model A",
+        ];
+  const responseAHeading = input.doubleBlind
+    ? "Response A"
+    : `Response A (${labelFirst})`;
+  const responseBHeading = input.doubleBlind
+    ? "Response B"
+    : `Response B (${labelSecond})`;
 
   const contextBlock = input.context
     ? `\n## Reference Context / System Prompt\n${input.context}\n`
     : "";
+  const labelContext = input.doubleBlind
+    ? "\n## Evaluation Mode\nDouble-blind. Model identities are intentionally hidden."
+    : `\n## Evaluation Mode\nNot blind. Labels are provided:\n- Response A label: ${labelFirst}\n- Response B label: ${labelSecond}`;
 
   return `You are an expert LLM response evaluator. Your job is to compare two responses to the same prompt and determine which is better.
 
 ## Critical Instructions
-- THINK STEP BY STEP. In "chain_of_thought", evaluate Response A fully on ALL criteria FIRST, then evaluate Response B fully on ALL criteria, THEN compare and decide.
+- Analyze carefully, but output only concise rationale in "chain_of_thought" (3-6 bullets).
 - Evaluate each response INDEPENDENTLY before comparing them — do not let your impression of one affect your scoring of the other.
 - Response LENGTH is NOT a proxy for quality. Prefer substance, accuracy, and relevance over verbosity.
 - Guard against POSITION BIAS: do not favor a response simply because it appears first or second.
@@ -126,13 +146,14 @@ export function buildPairwisePrompt(
 - The verdict must be exactly "A", "B", or "tie". Reserve "tie" for cases where both responses are genuinely equivalent in quality.
 - Output ONLY valid JSON matching the exact schema below. No markdown code fences, no extra text.
 ${contextBlock}
+${labelContext}
 ## Prompt Given to the LLM
 ${input.prompt}
 
-## Response A
+## ${responseAHeading}
 ${responseFirst}
 
-## Response B
+## ${responseBHeading}
 ${responseSecond}
 
 ## Rubric: ${rubric.name}

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
   DndContext,
   closestCenter,
@@ -39,12 +38,10 @@ function CriterionRow({
   criterion,
   onChange,
   onDelete,
-  totalWeight,
 }: {
   criterion: RubricCriterion;
   onChange: (updated: RubricCriterion) => void;
   onDelete: () => void;
-  totalWeight: number;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: criterion.id });
@@ -222,7 +219,6 @@ export function RubricBuilder({ criteria, onChange }: RubricBuilderProps) {
               criterion={c}
               onChange={(updated) => handleChange(c.id, updated)}
               onDelete={() => handleDelete(c.id)}
-              totalWeight={totalWeight}
             />
           ))}
         </SortableContext>

@@ -5,8 +5,14 @@ export function getApiKeyHeaders(
   modelId: string,
   apiKeys: ApiKeys
 ): Record<string, string> {
-  const provider = resolveProvider(modelId);
   const headers: Record<string, string> = {};
+  let provider: ReturnType<typeof resolveProvider>;
+
+  try {
+    provider = resolveProvider(modelId);
+  } catch {
+    return headers;
+  }
 
   if (provider === "openai" && apiKeys.openai) {
     headers["x-openai-api-key"] = apiKeys.openai;
@@ -38,10 +44,10 @@ export function hasAnyApiKey(apiKeys: ApiKeys): boolean {
 
 /**
  * Returns the id of the best default model given the configured keys.
- * Prefers anthropic → openai → google. Returns undefined if no keys are set.
+ * Prefers openai → anthropic → google. Returns undefined if no keys are set.
  */
 export function getDefaultModelId(apiKeys: ApiKeys): string | undefined {
-  const preferredOrder: Array<keyof ApiKeys> = ["anthropic", "openai", "google"];
+  const preferredOrder: Array<keyof ApiKeys> = ["openai", "anthropic", "google"];
   for (const provider of preferredOrder) {
     if (apiKeys[provider]) {
       const model = MODELS.find((m) => m.provider === provider);

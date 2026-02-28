@@ -31,6 +31,7 @@ interface BatchRow {
   status: BatchRowStatus;
   result?: EvalResult;
   error?: string;
+  validationError?: string;
 }
 
 function StatusIcon({ status }: { status: BatchRowStatus }) {
@@ -84,6 +85,7 @@ export default function BatchPage() {
   const [rows, setRows] = useState<BatchRow[]>([]);
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
+  const [parseIssues, setParseIssues] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef(false);
 
@@ -102,21 +104,28 @@ export default function BatchPage() {
       const reader = new FileReader();
       reader.onload = (e) => {
         const text = e.target?.result as string;
-        const parsed = text
-          .split("\n")
-          .filter((l) => l.trim())
-          .map((line, i) => {
-            try {
-              return { index: i, ...JSON.parse(line) };
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean) as Record<string, unknown>[];
+        const lines = text.split("\n").filter((l) => l.trim());
+        const jsonRows: Record<string, unknown>[] = [];
+        const jsonIssues: string[] = [];
 
-        setRows(convertToRows(parsed));
+        lines.forEach((line, i) => {
+          try {
+            jsonRows.push(JSON.parse(line) as Record<string, unknown>);
+          } catch {
+            jsonIssues.push(`Line ${i + 1}: invalid JSON`);
+          }
+        });
+
+        const converted = convertToRows(jsonRows);
+        setRows(converted);
         setDone(false);
-        toast.success(`Loaded ${parsed.length} rows from JSONL.`);
+        setParseIssues(jsonIssues);
+
+        const rowValidationErrors = converted.filter((r) => r.validationError).length;
+        const loadedCount = converted.length;
+        toast.success(
+          `Loaded ${loadedCount} JSONL rows (${jsonIssues.length} parse issue${jsonIssues.length === 1 ? "" : "s"}, ${rowValidationErrors} validation issue${rowValidationErrors === 1 ? "" : "s"}).`
+        );
       };
       reader.readAsText(file);
     } else {
@@ -125,9 +134,19 @@ export default function BatchPage() {
         header: true,
         skipEmptyLines: true,
         complete: (result) => {
-          setRows(convertToRows(result.data as Record<string, unknown>[]));
+          const converted = convertToRows(result.data as Record<string, unknown>[]);
+          const csvIssues = result.errors.map(
+            (err) => `Row ${err.row ?? "unknown"}: ${err.message}`
+          );
+
+          setRows(converted);
           setDone(false);
-          toast.success(`Loaded ${result.data.length} rows from CSV.`);
+          setParseIssues(csvIssues);
+
+          const rowValidationErrors = converted.filter((r) => r.validationError).length;
+          toast.success(
+            `Loaded ${converted.length} CSV rows (${csvIssues.length} parse issue${csvIssues.length === 1 ? "" : "s"}, ${rowValidationErrors} validation issue${rowValidationErrors === 1 ? "" : "s"}).`
+          );
         },
         error: (err) => {
           toast.error(`CSV parse error: ${err.message}`);
@@ -136,26 +155,67 @@ export default function BatchPage() {
     }
   }
 
+  function getStringField(row: Record<string, unknown>, ...keys: string[]): string {
+    for (const key of keys) {
+      const value = row[key];
+      if (value === null || value === undefined) continue;
+      const s = String(value).trim();
+      if (s) return s;
+    }
+    return "";
+  }
+
   function convertToRows(data: Record<string, unknown>[]): BatchRow[] {
     return data.map((row, i) => {
-      const hasResponseA = "responseA" in row || "response_a" in row;
-      const mode: EvaluationMode = hasResponseA ? "pairwise" : "single";
+      const explicitMode = getStringField(row, "mode").toLowerCase();
+      const prompt = getStringField(row, "prompt");
+      const response = getStringField(row, "response");
+      const responseA = getStringField(row, "responseA", "response_a");
+      const responseB = getStringField(row, "responseB", "response_b");
+      const context = getStringField(row, "context") || undefined;
+
+      const hasPairwiseData = !!(responseA || responseB);
+      const hasSingleData = !!response;
+
+      let mode: EvaluationMode = "single";
+      let validationError = "";
+
+      if (explicitMode === "single" || explicitMode === "pairwise") {
+        mode = explicitMode;
+      } else if (hasPairwiseData && !hasSingleData) {
+        mode = "pairwise";
+      } else if (!hasPairwiseData && hasSingleData) {
+        mode = "single";
+      } else if (hasPairwiseData && hasSingleData) {
+        mode = "pairwise";
+      } else {
+        validationError = "Missing response content. Provide `response` or `responseA` + `responseB`.";
+      }
+
+      if (!prompt) {
+        validationError = validationError || "Missing required `prompt`.";
+      }
+
+      if (mode === "single" && !response) {
+        validationError = validationError || "Single mode requires `response`.";
+      }
+
+      if (mode === "pairwise" && (!responseA || !responseB)) {
+        validationError =
+          validationError || "Pairwise mode requires both `responseA` and `responseB`.";
+      }
 
       return {
         index: i,
         mode,
-        prompt: String(row.prompt ?? ""),
-        response: row.response ? String(row.response) : undefined,
-        responseA:
-          row.responseA || row.response_a
-            ? String(row.responseA ?? row.response_a ?? "")
-            : undefined,
-        responseB:
-          row.responseB || row.response_b
-            ? String(row.responseB ?? row.response_b ?? "")
-            : undefined,
-        context: row.context ? String(row.context) : undefined,
-        status: "pending",
+        prompt,
+        response: response || undefined,
+        responseA: responseA || undefined,
+        responseB: responseB || undefined,
+        context,
+        status: validationError ? "error" : "pending",
+        error: validationError || undefined,
+        validationError: validationError || undefined,
       };
     });
   }
@@ -175,15 +235,38 @@ export default function BatchPage() {
     setDone(false);
     abortRef.current = false;
 
-    // Reset all rows to pending
-    setRows((prev) => prev.map((r) => ({ ...r, status: "pending", result: undefined, error: undefined })));
+    const preparedRows = rows.map((r) =>
+      r.validationError
+        ? {
+            ...r,
+            status: "error" as BatchRowStatus,
+            result: undefined,
+            error: r.validationError,
+          }
+        : {
+            ...r,
+            status: "pending" as BatchRowStatus,
+            result: undefined,
+            error: undefined,
+          }
+    );
+    setRows(preparedRows);
+
+    const runnableCount = preparedRows.filter((r) => r.status === "pending").length;
+    if (runnableCount === 0) {
+      setRunning(false);
+      setDone(true);
+      toast.error("No valid rows to run. Fix file validation errors first.");
+      return;
+    }
 
     const headers = getApiKeyHeaders(modelId, settings.apiKeys);
 
-    for (let i = 0; i < rows.length; i++) {
+    for (let i = 0; i < preparedRows.length; i++) {
       if (abortRef.current) break;
 
-      const row = rows[i];
+      const row = preparedRows[i];
+      if (row.status === "error") continue;
 
       // Mark running
       setRows((prev) =>
@@ -235,9 +318,23 @@ export default function BatchPage() {
       }
     }
 
+    if (abortRef.current) {
+      setRows((prev) =>
+        prev.map((r) =>
+          r.status === "pending"
+            ? { ...r, status: "error", error: "Canceled" }
+            : r
+        )
+      );
+    }
+
     setRunning(false);
     setDone(true);
-    toast.success("Batch evaluation complete!");
+    if (abortRef.current) {
+      toast.message("Batch evaluation canceled.");
+    } else {
+      toast.success("Batch evaluation complete!");
+    }
   }
 
   function handleDownload() {
@@ -290,10 +387,12 @@ export default function BatchPage() {
       responseB: row.responseB,
       context: row.context,
       status: "pending",
+      validationError: undefined,
     }));
     setRubricId(BATCH_DEMO_RUBRIC_ID);
     setRows(demoRows);
     setDone(false);
+    setParseIssues([]);
     toast.success(`Demo loaded — ${demoRows.length} rows ready. Click Run Batch to evaluate.`);
   }
 
@@ -377,6 +476,18 @@ export default function BatchPage() {
                   {rows.filter((r) => r.mode === "single").length} single)
                 </p>
               )}
+
+              {parseIssues.length > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 space-y-1">
+                  <p className="font-medium">Parse issues ({parseIssues.length})</p>
+                  {parseIssues.slice(0, 4).map((issue, idx) => (
+                    <p key={`${issue}-${idx}`}>{issue}</p>
+                  ))}
+                  {parseIssues.length > 4 && (
+                    <p>…and {parseIssues.length - 4} more.</p>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -398,6 +509,19 @@ export default function BatchPage() {
                 </>
               )}
             </Button>
+
+            {running && (
+              <Button
+                variant="outline"
+                className="w-full gap-2"
+                onClick={() => {
+                  abortRef.current = true;
+                }}
+              >
+                <XCircle className="h-4 w-4" />
+                Cancel Run
+              </Button>
+            )}
 
             {done && (
               <Button

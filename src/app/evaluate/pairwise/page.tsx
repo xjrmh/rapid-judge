@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { ModelSelector } from "@/components/model-selector";
 import { RubricSelector } from "@/components/rubric-selector";
@@ -68,8 +68,8 @@ export default function PairwisePage() {
           prompt,
           responseA,
           responseB,
-          modelLabelA: labelA.trim() || undefined,
-          modelLabelB: labelB.trim() || undefined,
+          modelLabelA: doubleBlind ? undefined : labelA.trim() || undefined,
+          modelLabelB: doubleBlind ? undefined : labelB.trim() || undefined,
           rubricId,
           rubric,
           modelId,

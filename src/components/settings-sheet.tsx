@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useStore } from "@/lib/store";
+import { PRIVACY_COPY } from "@/lib/privacy-copy";
 
 function ApiKeyField({
   label,
@@ -84,8 +85,7 @@ export function SettingsSheet() {
         <SheetHeader>
           <SheetTitle>Settings</SheetTitle>
           <SheetDescription>
-            Configure your API keys to use Rapid Judge. Keys are stored locally
-            in your browser and never sent to our servers.
+            Configure your API keys to use Rapid Judge.
           </SheetDescription>
         </SheetHeader>
 
@@ -119,11 +119,7 @@ export function SettingsSheet() {
 
           <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground space-y-1">
             <p className="font-medium text-foreground">Privacy Note</p>
-            <p>
-              Your API keys are stored only in your browser&apos;s localStorage.
-              All evaluation requests are made directly from your browser to the
-              LLM provider APIs — we never store or log your keys.
-            </p>
+            <p>{PRIVACY_COPY}</p>
           </div>
         </div>
       </SheetContent>

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useStore } from "@/lib/store";
+import { PRIVACY_COPY } from "@/lib/privacy-copy";
 
 function ApiKeyField({
   label,
@@ -91,8 +92,7 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="text-base">API Keys</CardTitle>
           <CardDescription>
-            Keys are stored only in your browser&apos;s localStorage and sent directly to
-            the provider — never to our servers.
+            Configure only the providers you plan to use for judging.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -121,11 +121,7 @@ export default function SettingsPage() {
 
       <div className="rounded-md bg-muted/50 border p-4 text-sm text-muted-foreground space-y-1">
         <p className="font-medium text-foreground">Privacy</p>
-        <p>
-          Your API keys never leave your browser. All evaluation requests are proxied through
-          the Next.js API route on this server, which reads your key from the request header
-          and forwards it to the LLM provider. The key is never logged or stored server-side.
-        </p>
+        <p>{PRIVACY_COPY}</p>
       </div>
     </div>
   );

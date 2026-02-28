@@ -76,6 +76,7 @@ export interface SingleEvalResult {
   rubric: Rubric;
   judgeModel: ModelSpec;
   chainOfThought: string;
+  summary: string;
   criterionScores: CriterionScore[];
   aggregateScore: number; // 0–100
   inputTokens: number;
@@ -91,6 +92,7 @@ export interface PairwiseEvalResult {
   rubric: Rubric;
   judgeModel: ModelSpec;
   chainOfThought: string;
+  summary: string;
   criterionScoresA: CriterionScore[];
   criterionScoresB: CriterionScore[];
   aggregateScoreA: number;

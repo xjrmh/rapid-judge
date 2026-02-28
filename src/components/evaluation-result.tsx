@@ -15,7 +15,7 @@ import type { EvalResult, SingleEvalResult, PairwiseEvalResult, CriterionScore }
 
 function CriterionRow({ cs }: { cs: CriterionScore }) {
   const [open, setOpen] = useState(false);
-  const pct = (cs.score / cs.maxScore) * 100;
+  const pct = Math.max(0, Math.min(100, (cs.score / cs.maxScore) * 100));
 
   return (
     <div className="space-y-1">
@@ -36,13 +36,8 @@ function CriterionRow({ cs }: { cs: CriterionScore }) {
       <Progress
         value={pct}
         className="h-1.5"
-        // Custom color via inline style since Progress doesn't take color props
-      >
-        <div
-          className={`h-full rounded-full ${scoreToBarColor(cs.score, cs.maxScore)}`}
-          style={{ width: `${pct}%` }}
-        />
-      </Progress>
+        indicatorClassName={scoreToBarColor(cs.score, cs.maxScore)}
+      />
       {open && cs.reasoning && (
         <p className="text-xs text-muted-foreground pl-0 pt-1 leading-relaxed">
           {cs.reasoning}
@@ -72,7 +67,7 @@ function ChainOfThought({ text }: { text: string }) {
         className="flex w-full items-center justify-between px-4 py-2 text-sm font-medium hover:bg-muted/50 transition-colors"
         onClick={() => setOpen((o) => !o)}
       >
-        <span>Chain-of-Thought Reasoning</span>
+        <span>Judge Reasoning Notes</span>
         {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
       </button>
       {open && (
@@ -125,12 +120,13 @@ function SingleResult({ result }: { result: SingleEvalResult }) {
       <Separator />
 
       {/* Summary */}
-      {result.chainOfThought && (
+      {(result.summary || result.chainOfThought) && (
         <div>
           <h3 className="text-sm font-semibold mb-2">Overall Assessment</h3>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            {/* Show last paragraph of CoT as summary */}
-            {result.chainOfThought.split("\n").filter(Boolean).slice(-1)[0] ?? ""}
+            {result.summary ||
+              result.chainOfThought.split("\n").filter(Boolean).slice(-1)[0] ||
+              "No summary provided."}
           </p>
         </div>
       )}
@@ -204,6 +200,15 @@ function PairwiseResult({ result }: { result: PairwiseEvalResult }) {
       {/* Verdict banner */}
       <VerdictBanner result={result} />
 
+      {result.summary && (
+        <div>
+          <h3 className="text-sm font-semibold mb-2">Overall Assessment</h3>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {result.summary}
+          </p>
+        </div>
+      )}
+
       {/* Position bias warning */}
       {result.positionBiasDetected && (
         <div className="flex items-start gap-2 rounded-md border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
@@ -241,7 +246,7 @@ function PairwiseResult({ result }: { result: PairwiseEvalResult }) {
 
       <Separator />
 
-      {/* CoT */}
+      {/* Reasoning notes */}
       <ChainOfThought text={result.chainOfThought} />
 
       {/* Footer */}

@@ -11,11 +11,10 @@ export function NoApiKeyBanner() {
   if (hasAnyApiKey(settings?.apiKeys ?? {})) return null;
 
   return (
-    <Alert variant="destructive" className="border-yellow-200 bg-yellow-50 text-yellow-800">
-      <AlertTriangle className="h-4 w-4 text-yellow-600" />
+    <Alert className="border-amber-300 bg-amber-50 text-amber-900">
+      <AlertTriangle className="h-4 w-4 text-amber-700" />
       <AlertDescription>
-        No API key configured. Go to the{" "}
-        <strong>Settings</strong> tab in the nav to add a key for OpenAI, Anthropic, or Google.
+        The app is in demo mode as no API key configured. Go to the Settings tab to add a key for OpenAI, Anthropic, or Google.
       </AlertDescription>
     </Alert>
   );
