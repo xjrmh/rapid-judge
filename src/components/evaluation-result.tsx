@@ -114,7 +114,7 @@ function SingleResult({ result }: { result: SingleEvalResult }) {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-muted-foreground mb-1">Aggregate Score</p>
-          <AggregateScoreBadge score={result.aggregateScore} />
+          <AggregateScoreBadge score={result.aggregateScore} size="md" />
         </div>
         <div className="text-right">
           <p className="text-sm text-muted-foreground mb-1">Rubric</p>

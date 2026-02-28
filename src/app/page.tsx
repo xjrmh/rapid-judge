@@ -72,7 +72,7 @@ export default function HomePage() {
   return (
     <div className="space-y-12">
       {/* Hero */}
-      <div className="text-center space-y-4 py-8">
+      <div className="text-center space-y-4 pt-8">
         <div className="inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm text-muted-foreground bg-muted/50">
           <span>Powered by OpenAI · Anthropic · Google</span>
         </div>

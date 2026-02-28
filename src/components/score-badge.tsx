@@ -54,7 +54,7 @@ export function AggregateScoreBadge({
   const colorClass = scoreToColorClass(score, 100);
 
   const sizeClasses = {
-    sm: "text-sm px-2 py-0.5 rounded font-medium",
+    sm: "text-xs px-2 py-0.5 rounded-full font-medium",
     md: "text-base px-2.5 py-1 rounded-md font-semibold",
     lg: "text-2xl px-4 py-2 rounded-lg font-bold",
   };

@@ -188,11 +188,18 @@ export default function HistoryPage() {
       ) : (
         <Card className="overflow-hidden">
           {/* Table header */}
-          <div className="hidden sm:grid grid-cols-4 gap-3 px-3 py-2 bg-muted/50 border-b text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            <span>Date</span>
-            <span>Mode</span>
-            <span>Prompt</span>
-            <span>Result</span>
+          <div className="hidden sm:flex items-center gap-3 px-3 py-2 bg-muted/50 border-b text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <div className="flex-1 min-w-0 grid grid-cols-4 gap-3">
+              <span>Date</span>
+              <span>Mode</span>
+              <span>Prompt</span>
+              <span>Result</span>
+            </div>
+            {/* invisible spacer matching the action buttons column */}
+            <div className="flex items-center gap-1 flex-shrink-0 invisible" aria-hidden>
+              <button className="p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+              <ChevronDown className="h-4 w-4" />
+            </div>
           </div>
           <div>
             {filtered.map((result) => (
