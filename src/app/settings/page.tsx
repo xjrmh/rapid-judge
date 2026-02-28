@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Eye, EyeOff, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,9 @@ import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useStore } from "@/lib/store";
 import { PRIVACY_COPY } from "@/lib/privacy-copy";
+import { ModelSelector } from "@/components/model-selector";
+import { RubricSelector } from "@/components/rubric-selector";
+import { toast } from "sonner";
 
 function ApiKeyField({
   label,
@@ -79,11 +82,36 @@ function ApiKeyField({
 }
 
 export default function SettingsPage() {
+  const { settings, updateSettings, exportSettings, importSettings } = useStore();
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  function handleExport() {
+    const json = exportSettings();
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rapid-judge-settings-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Settings exported.");
+  }
+
+  async function handleImport(file: File) {
+    const raw = await file.text();
+    const result = importSettings(raw);
+    if (result.ok) {
+      toast.success("Settings imported.");
+    } else {
+      toast.error(`Import failed: ${result.error}`);
+    }
+  }
+
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground mt-1">
+    <div className="tab-page max-w-3xl">
+      <div className="tab-header">
+        <h1 className="tab-title">Settings</h1>
+        <p className="tab-subtitle">
           Configure your API keys. You only need keys for the providers you want to use as judges.
         </p>
       </div>
@@ -116,6 +144,65 @@ export default function SettingsPage() {
             placeholder="AIza..."
             docsUrl="https://aistudio.google.com/app/apikey"
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Defaults</CardTitle>
+          <CardDescription>
+            Configure default judge and rubric selections for new evaluations and runs.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Default Judge Model</Label>
+            <ModelSelector
+              value={settings.defaultModelId}
+              onValueChange={(value) => updateSettings({ defaultModelId: value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Default Rubric</Label>
+            <RubricSelector
+              value={settings.defaultRubricId}
+              onValueChange={(value) => updateSettings({ defaultRubricId: value })}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Settings Export/Import</CardTitle>
+          <CardDescription>
+            Export settings JSON for backup or import into another local environment.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              void handleImport(file);
+              e.currentTarget.value = "";
+            }}
+          />
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleExport}>
+              Export Settings
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => importInputRef.current?.click()}
+            >
+              Import Settings
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

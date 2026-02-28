@@ -1,190 +1,244 @@
+"use client";
+
 import Link from "next/link";
-import { Scale, ArrowLeftRight, Layers, BookOpen, ArrowRight, Brain, Shield, BarChart3 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { ArrowRight, BarChart3, Database, FlaskConical, ShieldCheck } from "lucide-react";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useStore } from "@/lib/store";
+import { formatCost, formatDate } from "@/lib/utils";
 
-const FEATURES = [
+const QUICK_ACTIONS = [
   {
-    href: "/evaluate/single",
-    icon: Scale,
-    title: "Single Evaluation",
-    description:
-      "Score an LLM response against a structured rubric. Get per-criterion scores, chain-of-thought reasoning, and an aggregate quality score.",
-    badge: "Start here",
-    color: "text-blue-600",
-    bg: "bg-blue-50",
-  },
-  {
-    href: "/evaluate/pairwise",
-    icon: ArrowLeftRight,
-    title: "Pairwise Comparison",
-    description:
-      "Compare two LLM responses head-to-head. Supports double-blind evaluation and position bias detection to ensure fair results.",
-    badge: "Anti-bias",
-    color: "text-purple-600",
-    bg: "bg-purple-50",
-  },
-  {
-    href: "/evaluate/batch",
-    icon: Layers,
-    title: "Batch Evaluation",
-    description:
-      "Upload a CSV or JSONL file to evaluate hundreds of responses at once. Download results for analysis in any tool.",
-    badge: "Scale",
-    color: "text-green-600",
-    bg: "bg-green-50",
-  },
-  {
-    href: "/evaluate/rubrics",
-    icon: BookOpen,
-    title: "Rubric Builder",
-    description:
-      "Create custom evaluation rubrics with weighted criteria. Choose from 5 built-in templates or build your own from scratch.",
-    badge: "Customize",
-    color: "text-orange-600",
-    bg: "bg-orange-50",
-  },
-];
-
-const PRINCIPLES = [
-  {
-    icon: Brain,
-    title: "Chain-of-Thought Reasoning",
-    description:
-      "Judges explain their reasoning step-by-step before scoring, producing more calibrated and trustworthy evaluations.",
-  },
-  {
-    icon: Shield,
-    title: "Bias Mitigation",
-    description:
-      "Double-blind mode hides model labels. Position bias detection runs evaluations in both orders and flags disagreements.",
-  },
-  {
+    href: "/evaluate",
+    title: "Run Evaluation",
+    description: "Single, pairwise, and batch ad-hoc judging.",
     icon: BarChart3,
-    title: "Reproducible Results",
-    description:
-      "Temperature is fixed at 0.1 server-side. Same inputs produce consistent, comparable scores across evaluation runs.",
+  },
+  {
+    href: "/datasets",
+    title: "Manage Datasets",
+    description: "Import immutable versions and inspect slices.",
+    icon: Database,
+  },
+  {
+    href: "/experiments",
+    title: "Run Experiments",
+    description: "Dataset-pinned runs, compare deltas, and gates.",
+    icon: FlaskConical,
+  },
+  {
+    href: "/judge-qa",
+    title: "Judge QA",
+    description: "Calibrate against human labels and bias diagnostics.",
+    icon: ShieldCheck,
   },
 ];
 
-export default function HomePage() {
+function trend(values: number[]): number {
+  if (values.length < 2) return 0;
+  return values[values.length - 1] - values[0];
+}
+
+export default function DashboardPage() {
+  const { experimentRuns, settings } = useStore();
+  const recentRuns = [...experimentRuns].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt)
+  );
+
+  const latest12 = recentRuns.slice(0, 12);
+  const avgScore =
+    latest12.length === 0
+      ? 0
+      : latest12.reduce((sum, run) => sum + run.metrics.meanAggregateScore, 0) /
+        latest12.length;
+  const totalCost = latest12.reduce((sum, run) => sum + run.metrics.estimatedCostUsd, 0);
+  const passRate =
+    latest12.length === 0
+      ? 0
+      : latest12.reduce((sum, run) => sum + run.metrics.passRate, 0) / latest12.length;
+
+  const scoreTrend = trend(latest12.map((run) => run.metrics.meanAggregateScore).reverse());
+  const costTrend = trend(latest12.map((run) => run.metrics.estimatedCostUsd).reverse());
+  const alerts: string[] = [];
+  if (passRate < settings.alertThresholds.minAgreementRate) {
+    alerts.push(
+      `Pass rate ${(passRate * 100).toFixed(1)}% is below threshold ${(settings.alertThresholds.minAgreementRate * 100).toFixed(1)}%.`
+    );
+  }
+  if (Math.abs(scoreTrend) > settings.alertThresholds.maxScoreDrift) {
+    alerts.push(
+      `Score drift ${scoreTrend.toFixed(2)} exceeds threshold ${settings.alertThresholds.maxScoreDrift.toFixed(2)}.`
+    );
+  }
+  if (latest12.length >= 2) {
+    const baselineCost = latest12[latest12.length - 1].metrics.estimatedCostUsd;
+    const latestCost = latest12[0].metrics.estimatedCostUsd;
+    const deltaPct = baselineCost === 0 ? 0 : ((latestCost - baselineCost) / baselineCost) * 100;
+    if (deltaPct > settings.alertThresholds.maxCostIncreasePct) {
+      alerts.push(
+        `Cost increase ${deltaPct.toFixed(1)}% exceeds threshold ${settings.alertThresholds.maxCostIncreasePct.toFixed(1)}%.`
+      );
+    }
+  }
+
   return (
-    <div className="space-y-12">
-      {/* Hero */}
-      <div className="text-center space-y-4 pt-8">
-        <div className="inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm text-muted-foreground bg-muted/50">
-          <span>Powered by OpenAI · Anthropic · Google</span>
-        </div>
-        <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
-          Rapid Judge
-        </h1>
-        <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-          Automated LLM-as-judge evaluation. Score responses, compare models,
-          and run batch evaluations — with built-in bias mitigation.
-        </p>
-        <div className="flex gap-3 justify-center">
-          <Button asChild size="lg">
-            <Link href="/evaluate/single">
-              Start Evaluating
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Link>
-          </Button>
-          <Button asChild variant="outline" size="lg">
-            <Link href="/evaluate/rubrics">Build a Rubric</Link>
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Bring your own API keys — stored locally, never shared.
+    <div className="tab-page">
+      <div className="tab-header">
+        <h1 className="tab-title">Evaluation Dashboard</h1>
+        <p className="tab-subtitle">
+          Track recent runs, quality movement, and operational cost across your eval lifecycle.
         </p>
       </div>
 
-      {/* Feature cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {FEATURES.map(({ href, icon: Icon, title, description, badge, color, bg }) => (
-          <Link key={href} href={href} className="group">
-            <Card className="h-full hover:shadow-md transition-shadow cursor-pointer hover:border-primary/30">
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className={`p-2 rounded-lg ${bg}`}>
-                    <Icon className={`h-5 w-5 ${color}`} />
-                  </div>
-                  <Badge variant="outline" className="text-xs">
-                    {badge}
-                  </Badge>
-                </div>
-                <CardTitle className="text-base mt-3">{title}</CardTitle>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <MetricCard
+          title="Mean Quality"
+          value={avgScore.toFixed(1)}
+          suffix="/100"
+          trend={scoreTrend}
+        />
+        <MetricCard
+          title="Mean Pass Rate"
+          value={(passRate * 100).toFixed(1)}
+          suffix="%"
+          trend={0}
+        />
+        <MetricCard
+          title="Cost (last 12 runs)"
+          value={formatCost(totalCost)}
+          trend={costTrend}
+          showSigned={false}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {QUICK_ACTIONS.map(({ href, title, description, icon: Icon }) => (
+          <Link key={href} href={href}>
+            <Card className="h-full hover:border-primary/40 hover:shadow-sm transition-all">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Icon className="h-4 w-4 text-primary" />
+                  {title}
+                </CardTitle>
               </CardHeader>
               <CardContent>
-                <CardDescription className="text-sm leading-relaxed">
-                  {description}
-                </CardDescription>
-                <div className="mt-3 flex items-center text-sm text-primary font-medium group-hover:gap-2 transition-all">
-                  Get started
-                  <ArrowRight className="ml-1 h-3.5 w-3.5" />
-                </div>
+                <CardDescription>{description}</CardDescription>
               </CardContent>
             </Card>
           </Link>
         ))}
       </div>
 
-      {/* Principles */}
-      <div className="space-y-4">
-        <h2 className="text-xl font-semibold text-center">
-          Built on LLM-as-Judge Best Practices
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {PRINCIPLES.map(({ icon: Icon, title, description }) => (
-            <div key={title} className="space-y-2 p-4 rounded-lg bg-muted/30">
-              <div className="flex items-center gap-2">
-                <Icon className="h-5 w-5 text-primary" />
-                <h3 className="font-medium text-sm">{title}</h3>
-              </div>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                {description}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Quick start */}
-      <Card className="bg-muted/30">
+      <Card>
         <CardHeader>
-          <CardTitle className="text-base">Quick Start</CardTitle>
+          <div>
+            <CardTitle className="text-base">Recent Activity</CardTitle>
+            <CardDescription>
+              Latest ad-hoc and dataset runs now unified in the experiment lifecycle.
+            </CardDescription>
+          </div>
+          <CardAction>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/experiments">
+                Open Experiments
+                <ArrowRight className="h-4 w-4 ml-1.5" />
+              </Link>
+            </Button>
+          </CardAction>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <div className="flex gap-3">
-            <span className="font-mono text-primary font-bold">1.</span>
-            <span>
-              Go to the <strong>Settings</strong> tab in the nav to add your API
-              key for OpenAI, Anthropic, or Google.
-            </span>
-          </div>
-          <div className="flex gap-3">
-            <span className="font-mono text-primary font-bold">2.</span>
-            <span>
-              Go to <strong>Single</strong> evaluation and paste a prompt +
-              response to score.
-            </span>
-          </div>
-          <div className="flex gap-3">
-            <span className="font-mono text-primary font-bold">3.</span>
-            <span>
-              Use <strong>Pairwise</strong> to compare outputs from two
-              different models.
-            </span>
-          </div>
-          <div className="flex gap-3">
-            <span className="font-mono text-primary font-bold">4.</span>
-            <span>
-              Use <strong>Batch</strong> to evaluate a CSV of responses at scale
-              and download results.
-            </span>
-          </div>
+        <CardContent className="space-y-2">
+          {recentRuns.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No runs yet. Start from Evaluate or Experiments.</p>
+          ) : (
+            recentRuns.slice(0, 8).map((run) => (
+              <div key={run.id} className="rounded-md border px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{run.runType}</Badge>
+                    <span className="font-medium">{run.config.name ?? run.id}</span>
+                    <Badge variant="secondary">{run.config.evalMode}</Badge>
+                  </div>
+                  <span className="text-xs text-muted-foreground">{formatDate(run.createdAt)}</span>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Score {run.metrics.meanAggregateScore.toFixed(1)} · Pass{" "}
+                  {(run.metrics.passRate * 100).toFixed(1)}% · Cost{" "}
+                  {formatCost(run.metrics.estimatedCostUsd)}
+                </div>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Operational Alerts</CardTitle>
+          <CardDescription>
+            Driven by thresholds from Settings for agreement floor, score drift, and cost increase.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {alerts.length === 0 ? (
+            <Badge variant="secondary">No active alerts</Badge>
+          ) : (
+            alerts.map((alert) => (
+              <div
+                key={alert}
+                className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+              >
+                {alert}
+              </div>
+            ))
+          )}
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function MetricCard({
+  title,
+  value,
+  suffix,
+  trend,
+  showSigned = true,
+}: {
+  title: string;
+  value: string;
+  suffix?: string;
+  trend: number;
+  showSigned?: boolean;
+}) {
+  const trendLabel =
+    trend === 0
+      ? "No change"
+      : `${trend > 0 ? "+" : ""}${trend.toFixed(2)} trend`;
+  const trendClass =
+    trend === 0 ? "text-muted-foreground" : trend > 0 ? "text-green-600" : "text-red-600";
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardDescription>{title}</CardDescription>
+        <CardTitle className="text-2xl">
+          {value}
+          {suffix && <span className="text-base text-muted-foreground ml-1">{suffix}</span>}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className={`text-xs ${trendClass}`}>
+          {showSigned ? trendLabel : trend === 0 ? "Stable" : "Shift detected"}
+        </p>
+      </CardContent>
+    </Card>
   );
 }

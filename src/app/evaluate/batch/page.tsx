@@ -400,11 +400,11 @@ export default function BatchPage() {
   const progress = rows.length > 0 ? (completed / rows.length) * 100 : 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Batch Evaluation</h1>
-          <p className="text-muted-foreground mt-1">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold tracking-tight">Batch Evaluation</h2>
+          <p className="text-sm text-muted-foreground">
             Upload a CSV or JSONL file to evaluate multiple responses at once.
           </p>
         </div>

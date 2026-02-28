@@ -18,7 +18,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Rapid Judge — LLM Evaluation",
   description:
-    "Automated LLM-as-judge evaluation with single scoring, pairwise comparison, and batch processing.",
+    "LLM-as-judge evaluation lifecycle: datasets, ad-hoc evaluation, experiments, rubric versioning, and judge QA.",
 };
 
 export default function RootLayout({

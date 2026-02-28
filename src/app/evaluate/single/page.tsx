@@ -94,11 +94,11 @@ export default function SingleEvalPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Single Evaluation</h1>
-          <p className="text-muted-foreground mt-1">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold tracking-tight">Single Evaluation</h2>
+          <p className="text-sm text-muted-foreground">
             Score a single LLM response against a rubric using an LLM judge.
           </p>
         </div>

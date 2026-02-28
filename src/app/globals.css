@@ -163,3 +163,21 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  .tab-page {
+    @apply space-y-6;
+  }
+
+  .tab-header {
+    @apply space-y-1;
+  }
+
+  .tab-title {
+    @apply text-2xl font-bold tracking-tight;
+  }
+
+  .tab-subtitle {
+    @apply text-sm text-muted-foreground;
+  }
+}
