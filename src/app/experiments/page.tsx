@@ -2,7 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ArrowLeftRight, FlaskConical, History, Play, RefreshCw } from "lucide-react";
+import {
+  ArrowLeftRight,
+  FlaskConical,
+  History,
+  Play,
+  RefreshCw,
+  Sparkles,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -49,6 +56,24 @@ const DEFAULT_PROMPT_VERSION = {
   createdAt: "2026-01-01T00:00:00.000Z",
   notes: "Structured JSON grading prompt v1",
 };
+
+const DEMO_RUBRIC_ID = "builtin-overall";
+
+const EXPERIMENT_DEMO_JSONL = `{"prompt":"Explain RAG to a product manager in 3 bullets.","response":"RAG retrieves relevant documents before generation so responses are grounded.","task_type":"explanation","difficulty":"easy","language":"en"}
+{"prompt":"Write a concise postmortem summary for an API outage.","response":"Summarize timeline, impact, root cause, fixes, and prevention actions.","task_type":"ops","difficulty":"medium","language":"en"}
+{"prompt":"Propose 3 test cases for checkout discount logic.","response":"Include valid coupon, expired coupon, and stacked coupon rejection scenarios.","task_type":"qa","difficulty":"medium","language":"en"}`;
+
+interface DatasetImportResponse {
+  dataset: {
+    id: string;
+    name: string;
+  };
+  version: {
+    id: string;
+    versionNumber: number;
+    itemCount: number;
+  };
+}
 
 export default function ExperimentsPage() {
   const {
@@ -221,13 +246,71 @@ export default function ExperimentsPage() {
     }
   }
 
+  async function loadDemo() {
+    try {
+      const res = await fetch("/api/datasets/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Experiment Demo Dataset",
+          description: "Synthetic dataset for demo experiment runs.",
+          format: "jsonl",
+          content: EXPERIMENT_DEMO_JSONL,
+          tags: ["demo", "experiments"],
+        }),
+      });
+
+      const data = (await res.json()) as
+        | DatasetImportResponse
+        | { error?: string; issues?: string[] };
+      if (!res.ok) {
+        const err = data as { error?: string; issues?: string[] };
+        const issue = err.issues?.[0];
+        throw new Error(issue ?? err.error ?? `HTTP ${res.status}`);
+      }
+
+      const imported = data as DatasetImportResponse;
+
+      setDatasetId(imported.dataset.id);
+      setDatasetVersionId(imported.version.id);
+      setRunName("Demo Experiment Run");
+      setEvalMode("single");
+      setModelId(settings.defaultModelId);
+      setRubricId(DEMO_RUBRIC_ID);
+      setRepeats("2");
+      setComparison(null);
+      setBaselineRunId("");
+      setCandidateRunId("");
+
+      await fetchDatasets();
+      await fetchVersions(imported.dataset.id);
+
+      toast.success(
+        `Demo loaded — dataset "${imported.dataset.name}" v${imported.version.versionNumber} ready. Click Run Experiment.`
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Failed to load demo: ${message}`);
+    }
+  }
+
   return (
     <div className="tab-page">
-      <div className="tab-header">
-        <h1 className="tab-title">Experiments</h1>
-        <p className="tab-subtitle">
-          Configure dataset-pinned runs, compare deltas, and monitor regressions.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div className="tab-header">
+          <h1 className="tab-title">Experiments</h1>
+          <p className="tab-subtitle">
+            Configure dataset-pinned runs, compare deltas, and monitor regressions.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => void loadDemo()}
+          className="shrink-0 gap-1.5 btn-demo"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          Load Demo
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
